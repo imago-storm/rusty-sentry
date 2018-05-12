@@ -1,16 +1,19 @@
 use reqwest::{ClientBuilder, Method, Client};
-use reqwest::header::{Headers, ContentType};
+use reqwest::header::{Headers, ContentType, Cookie};
 use std::io::{Error,ErrorKind};
 use std::io::Read;
 use std::collections::HashMap;
 use url::percent_encoding::{utf8_percent_encode, DEFAULT_ENCODE_SET};
 use serde_json;
 
+const PORT: &str = "443";
+
 #[derive(Debug)]
 pub struct EFClient {
     server: String,
-    username: String,
-    password: String,
+    username: Option<String>,
+    password: Option<String>,
+    sid: Option<String>,
     port: String,
     client: Client,
 }
@@ -28,20 +31,27 @@ pub struct Property {
 }
 
 impl EFClient {
-    pub fn new(server: &str, username: &str, password: &str) -> EFClient {
-        let client = ClientBuilder::new()
-            .danger_disable_certificate_validation_entirely()
-            .build()
-            .unwrap();
-        let port = String::from("443");
 
-        EFClient {
-            server: String::from(server),
-            username: String::from(username),
-            password: String::from(password),
-            client,
-            port
+
+    pub fn new(server: &str, username: Option<&str>, password: Option<&str>, sid: Option<&str>) -> Result<EFClient, Error> {
+        let client = match ClientBuilder::new()
+            .danger_disable_certificate_validation_entirely()
+            .build() {
+            Ok(c) => Ok(c),
+            Err(e) => Err(Error::new(ErrorKind::Other, format!("Cannot create client: {}", e)))
+        }?;
+
+        if sid == None && (username == None || password == None) {
+            return Err(Error::new(ErrorKind::Other, "Either username & password or sid must be provided"));
         }
+        Ok(EFClient {
+            server: String::from(server),
+            username: username.map(str::to_string),
+            password: password.map(str::to_string),
+            sid: sid.map(str::to_string),
+            client,
+            port: String::from(PORT),
+        })
     }
 
     pub fn set_port(&mut self, port: &str) {
@@ -52,11 +62,23 @@ impl EFClient {
     fn request_json<'a>(&self, uri: &'a str, method: Method, payload: Option<&'a HashMap<&str, &str>>) -> Result<String, Error> {
         let url= format!("https://{}:{}/rest/v1.0/{}", &self.server, &self.port, uri);
         let mut req = self.client.request(method, &url);
-        req.basic_auth(
-            self.username.clone(),
-            Some(self.password.clone())
-        );
+
         let mut headers = Headers::new();
+//        Auth
+        if self.username != None && self.password != None {
+            let username = self.username.clone().unwrap();
+            req.basic_auth(
+                username,
+                self.password.clone()
+            );
+        }
+        else {
+            let mut cookie = Cookie::new();
+            let sid = self.sid.clone().expect("either username & password or sid must be provided");
+            cookie.append("sessionId", sid);
+            headers.set(cookie);
+        }
+
         headers.set(ContentType::json());
         req.headers(headers);
         match payload {

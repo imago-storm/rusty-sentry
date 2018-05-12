@@ -3,8 +3,6 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::path;
 use std::io::{Error, ErrorKind};
-use std::fs;
-use std::time::SystemTime;
 use std::fs::File;
 use std::io::prelude::*;
 use serde_xml_rs::deserialize;
