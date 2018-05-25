@@ -153,10 +153,16 @@ fn main() {
             exit(-1);
         }
     };
-    let updater = Updater::new(&path, ef_client).unwrap();
+    let updater = match Updater::new(&path, ef_client) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("Cannot create updater: {}", e);
+            exit(-1);
+        }
+    };
 
     if let Err(e) = watch(&path, &updater) {
-        println!("Error: {:?}", e);
+        eprintln!("Error: {:?}", e);
     }
 }
 
