@@ -18,7 +18,7 @@ use std::io::prelude::*;
 use getopts::Options;
 use url::Url;
 use notify::{RecommendedWatcher, Watcher, RecursiveMode, DebouncedEvent};
-use rusty_sentry::updater::Updater;
+use rusty_sentry::updater::{PartialUpdate, Updater, guess_plugin_type, PluginType, PluginWizard, PluginGradle};
 use rusty_sentry::ef_client::EFClient;
 use serde_xml_rs::deserialize;
 
@@ -153,17 +153,31 @@ fn main() {
             exit(-1);
         }
     };
-    let updater = match Updater::new(&path, ef_client) {
-        Ok(u) => u,
-        Err(e) => {
-            eprintln!("Cannot create updater: {}", e);
+
+//    Fuck this shit
+    let result = PluginWizard::build(&path, ef_client.clone());
+    if result.is_ok() {
+        let updater = result.unwrap();
+        if let Err(e) = _watch(&path, &updater) {
+            eprintln!("Error: {:?}", e);
+        }
+    }
+    else {
+        eprintln!("Cannot build Plugin Wizard updater: {}", result.err().unwrap());
+        let result = PluginGradle::build(&path, ef_client);
+        if result.is_ok() {
+            let updater = result.unwrap();
+
+            if let Err(e) = _watch(&path, &updater) {
+                eprintln!("Error: {:?}", e);
+            }
+        }
+        else {
+            eprintln!("Cannot build gradle updater: {}", result.err().unwrap());
             exit(-1);
         }
-    };
-
-    if let Err(e) = watch(&path, &updater) {
-        eprintln!("Error: {:?}", e);
     }
+
 }
 
 
@@ -187,20 +201,46 @@ fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
     }
 }
 
-fn watch(path: &PathBuf, updater: &Updater) -> notify::Result<()> {
+fn _watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUpdate {
     let (tx, rx) = channel();
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(1))?;
     watcher.watch(path, RecursiveMode::Recursive)?;
+
     println!("Started to watch {}", path.to_str().unwrap());
     loop {
         match rx.recv() {
             Ok(DebouncedEvent::Create(path)) => {
                 println!("Created {}", path.to_str().unwrap());
-                updater.update(&path);
+                plugin.update(&path);
             },
             Ok(DebouncedEvent::Write(path)) => {
                 println!("Write: {:?}", path);
-                updater.update(&path);
+                plugin.update(&path);
+            },
+            Ok(_) => {
+            },
+            Err(error) => {
+                println!("Watch error: {:?}", error);
+            }
+        }
+    }
+}
+
+fn watch(path: &PathBuf, upd: &Updater) -> notify::Result<()> {
+    let (tx, rx) = channel();
+    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(1))?;
+    watcher.watch(path, RecursiveMode::Recursive)?;
+
+    println!("Started to watch {}", path.to_str().unwrap());
+    loop {
+        match rx.recv() {
+            Ok(DebouncedEvent::Create(path)) => {
+                println!("Created {}", path.to_str().unwrap());
+                upd.update(&path);
+            },
+            Ok(DebouncedEvent::Write(path)) => {
+                println!("Write: {:?}", path);
+                upd.update(&path);
             },
             Ok(_) => {
             },

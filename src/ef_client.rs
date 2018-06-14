@@ -8,7 +8,7 @@ use serde_json;
 
 const PORT: &str = "443";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EFClient {
     server: String,
     username: Option<String>,
@@ -31,8 +31,6 @@ pub struct Property {
 }
 
 impl EFClient {
-
-
     pub fn new(server: &str, username: Option<&str>, password: Option<&str>, sid: Option<&str>) -> Result<EFClient, Error> {
         let client = match ClientBuilder::new()
             .danger_disable_certificate_validation_entirely()
@@ -52,6 +50,10 @@ impl EFClient {
             client,
             port: String::from(PORT),
         })
+    }
+
+    fn debug(message: &str) {
+        println!("[DEBUG] {}", message);
     }
 
     pub fn set_port(&mut self, port: &str) {
@@ -83,7 +85,7 @@ impl EFClient {
         req.headers(headers);
         match payload {
             Some(body) => {
-                println!("{:?}", body);
+                Self::debug(&format!("Body: {:?}", body));
                 req.json(&body.clone());
             },
             None => {},
@@ -106,7 +108,7 @@ impl EFClient {
         let mut payload = HashMap::new();
         payload.insert("value", value);
         let res = &self.request_json(&uri, Method::Put, Some(&payload))?;
-        println!("{:?}", res);
+        Self::debug(&format!("API Response: {:?}", res));
         let property: PropertyResponse = serde_json::from_str(&res)?;
         Ok(property.property)
     }
@@ -121,7 +123,7 @@ impl EFClient {
     pub fn status(&self) -> () {
         let uri = "server/status";
         let res = &self.request_json(&uri, Method::Get, None);
-        println!("{:?}", res);
+        Self::debug(&format!("{:?}", res));
     }
 }
 
