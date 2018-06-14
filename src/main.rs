@@ -10,7 +10,6 @@ use std::env;
 use std::path::PathBuf;
 use std::process::exit;
 use std::time::Duration;
-use std::collections::LinkedList;
 use std::sync::mpsc::channel;
 use std::fs::File;
 use std::error::Error;
@@ -18,7 +17,7 @@ use std::io::prelude::*;
 use getopts::Options;
 use url::Url;
 use notify::{RecommendedWatcher, Watcher, RecursiveMode, DebouncedEvent};
-use rusty_sentry::updater::{PartialUpdate, Updater, guess_plugin_type, PluginType, PluginWizard, PluginGradle};
+use rusty_sentry::updater::{PartialUpdate, guess_plugin_type, PluginType, PluginWizard, PluginGradle};
 use rusty_sentry::ef_client::EFClient;
 use serde_xml_rs::deserialize;
 
@@ -89,7 +88,10 @@ fn read_sid(server: &str) -> Option<String> {
         Err(_) => return None,
     };
     let mut contents = String::new();
-    file.read_to_string(&mut contents);
+    let result = file.read_to_string(&mut contents);
+    if result.is_err() {
+        return None;
+    }
 
     let sessions: Result<Sessions, serde_xml_rs::Error> = deserialize(contents.as_bytes());
     match sessions {
@@ -155,10 +157,12 @@ fn main() {
     };
 
 //    Fuck this shit
+//    This looks like shit, but it works for now
+//    Im sorry
     let result = PluginWizard::build(&path, ef_client.clone());
     if result.is_ok() {
         let updater = result.unwrap();
-        if let Err(e) = _watch(&path, &updater) {
+        if let Err(e) = watch(&path, &updater) {
             eprintln!("Error: {:?}", e);
         }
     }
@@ -168,7 +172,7 @@ fn main() {
         if result.is_ok() {
             let updater = result.unwrap();
 
-            if let Err(e) = _watch(&path, &updater) {
+            if let Err(e) = watch(&path, &updater) {
                 eprintln!("Error: {:?}", e);
             }
         }
@@ -201,7 +205,7 @@ fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
     }
 }
 
-fn _watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUpdate {
+fn watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUpdate {
     let (tx, rx) = channel();
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(1))?;
     watcher.watch(path, RecursiveMode::Recursive)?;
@@ -211,36 +215,17 @@ fn _watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialU
         match rx.recv() {
             Ok(DebouncedEvent::Create(path)) => {
                 println!("Created {}", path.to_str().unwrap());
-                plugin.update(&path);
+                let result = plugin.update(&path);
+                if result.is_err() {
+                    eprintln!("Error while updating: {}", result.err().unwrap());
+                }
             },
             Ok(DebouncedEvent::Write(path)) => {
                 println!("Write: {:?}", path);
-                plugin.update(&path);
-            },
-            Ok(_) => {
-            },
-            Err(error) => {
-                println!("Watch error: {:?}", error);
-            }
-        }
-    }
-}
-
-fn watch(path: &PathBuf, upd: &Updater) -> notify::Result<()> {
-    let (tx, rx) = channel();
-    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(1))?;
-    watcher.watch(path, RecursiveMode::Recursive)?;
-
-    println!("Started to watch {}", path.to_str().unwrap());
-    loop {
-        match rx.recv() {
-            Ok(DebouncedEvent::Create(path)) => {
-                println!("Created {}", path.to_str().unwrap());
-                upd.update(&path);
-            },
-            Ok(DebouncedEvent::Write(path)) => {
-                println!("Write: {:?}", path);
-                upd.update(&path);
+                let result = plugin.update(&path);
+                if result.is_err() {
+                    eprintln!("Error while updating: {}", result.err().unwrap());
+                }
             },
             Ok(_) => {
             },
