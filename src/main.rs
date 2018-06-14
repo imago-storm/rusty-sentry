@@ -159,28 +159,49 @@ fn main() {
 //    Fuck this shit
 //    This looks like shit, but it works for now
 //    Im sorry
-    let result = PluginWizard::build(&path, ef_client.clone());
-    if result.is_ok() {
-        let updater = result.unwrap();
-        if let Err(e) = watch(&path, &updater) {
-            eprintln!("Error: {:?}", e);
-        }
-    }
-    else {
-        eprintln!("Cannot build Plugin Wizard updater: {}", result.err().unwrap());
-        let result = PluginGradle::build(&path, ef_client);
-        if result.is_ok() {
-            let updater = result.unwrap();
 
-            if let Err(e) = watch(&path, &updater) {
-                eprintln!("Error: {:?}", e);
-            }
+    let plugin_type = guess_plugin_type(&path);
+
+    match plugin_type {
+        Ok(PluginType::PluginWizard) => {
+            let updater = PluginWizard::build(&path, ef_client).unwrap();
+            watch(&path, &updater).unwrap();
+        },
+        Ok(PluginType::Gradle) => {
+            let updater = PluginGradle::build(&path, ef_client).unwrap();
+            watch(&path, &updater).unwrap();
+        },
+        Err(e) => {
+            eprintln!("Cannot deduce plugin type: {}", e);
+            exit(1);
         }
-        else {
-            eprintln!("Cannot build gradle updater: {}", result.err().unwrap());
-            exit(-1);
-        }
-    }
+    };
+
+//    println!("{:?}", result)
+
+
+//    let result = PluginWizard::build(&path, ef_client.clone());
+//    if result.is_ok() {
+//        let updater = result.unwrap();
+//        if let Err(e) = watch(&path, &updater) {
+//            eprintln!("Error: {:?}", e);
+//        }
+//    }
+//    else {
+//        eprintln!("Cannot build Plugin Wizard updater: {}", result.err().unwrap());
+//        let result = PluginGradle::build(&path, ef_client);
+//        if result.is_ok() {
+//            let updater = result.unwrap();
+//
+//            if let Err(e) = watch(&path, &updater) {
+//                eprintln!("Error: {:?}", e);
+//            }
+//        }
+//        else {
+//            eprintln!("Cannot build gradle updater: {}", result.err().unwrap());
+//            exit(-1);
+//        }
+//    }
 
 }
 
