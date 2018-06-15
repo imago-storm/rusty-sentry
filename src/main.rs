@@ -5,6 +5,7 @@ extern crate getopts;
 extern crate serde_derive;
 extern crate serde_xml_rs;
 extern crate url;
+extern crate shellexpand;
 
 use std::env;
 use std::path::PathBuf;
@@ -20,7 +21,7 @@ use notify::{RecommendedWatcher, Watcher, RecursiveMode, DebouncedEvent};
 use rusty_sentry::updater::{PartialUpdate, guess_plugin_type, PluginType, PluginWizard, PluginGradle};
 use rusty_sentry::ef_client::EFClient;
 use serde_xml_rs::deserialize;
-
+use shellexpand::tilde;
 
 const SERVER: &str = "s";
 const USERNAME: &str = "u";
@@ -145,7 +146,9 @@ fn main() {
 
     let path: PathBuf = match matches.opt_str("path") {
         None => env::current_dir().unwrap(),
-        Some(p) => PathBuf::from(p)
+        Some(p) => {
+            PathBuf::from(tilde(&p).into_owned())
+        }
     };
 
     let ef_client = match build_client(&matches) {
@@ -156,20 +159,27 @@ fn main() {
         }
     };
 
-//    Fuck this shit
-//    This looks like shit, but it works for now
-//    Im sorry
-
     let plugin_type = guess_plugin_type(&path);
-
-    match plugin_type {
+    let result = match plugin_type {
         Ok(PluginType::PluginWizard) => {
-            let updater = PluginWizard::build(&path, ef_client).unwrap();
-            watch(&path, &updater).unwrap();
+            let updater = PluginWizard::build(&path, ef_client);
+            match updater {
+                Ok(upd) => watch(&path, &upd),
+                Err(e) => {
+                    eprintln!("Cannot build updater: {}", e);
+                    exit(1)
+                }
+            }
         },
         Ok(PluginType::Gradle) => {
-            let updater = PluginGradle::build(&path, ef_client).unwrap();
-            watch(&path, &updater).unwrap();
+            let updater = PluginGradle::build(&path, ef_client);
+            match updater {
+                Ok(upd) => watch(&path, &upd),
+                Err(e) => {
+                    eprintln!("Cannot build updater: {}", e);
+                    exit(1)
+                }
+            }
         },
         Err(e) => {
             eprintln!("Cannot deduce plugin type: {}", e);
@@ -177,34 +187,11 @@ fn main() {
         }
     };
 
-//    println!("{:?}", result)
-
-
-//    let result = PluginWizard::build(&path, ef_client.clone());
-//    if result.is_ok() {
-//        let updater = result.unwrap();
-//        if let Err(e) = watch(&path, &updater) {
-//            eprintln!("Error: {:?}", e);
-//        }
-//    }
-//    else {
-//        eprintln!("Cannot build Plugin Wizard updater: {}", result.err().unwrap());
-//        let result = PluginGradle::build(&path, ef_client);
-//        if result.is_ok() {
-//            let updater = result.unwrap();
-//
-//            if let Err(e) = watch(&path, &updater) {
-//                eprintln!("Error: {:?}", e);
-//            }
-//        }
-//        else {
-//            eprintln!("Cannot build gradle updater: {}", result.err().unwrap());
-//            exit(-1);
-//        }
-//    }
-
+    if result.is_err() {
+        eprintln!("Watch failed: {}", result.unwrap_err());
+        exit(1);
+    };
 }
-
 
 fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
     let server = matches.opt_str(SERVER).expect("Server must be provided");
@@ -225,6 +212,7 @@ fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
         Err(e) => Err(Box::new(e))
     }
 }
+
 
 fn watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUpdate {
     let (tx, rx) = channel();
@@ -256,4 +244,3 @@ fn watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUp
         }
     }
 }
-

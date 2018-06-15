@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
-use regex::{Regex, RegexBuilder};
-use std::collections::HashMap;
+use regex::Regex;
 use std::path;
 use std::io::{Error, ErrorKind};
 use std::fs::File;
@@ -36,12 +35,6 @@ struct Plugin {
 struct PluginMETAINF {
     key: String,
     version: String
-}
-
-struct Gradle {
-    key: String,
-    version: String,
-    manifest_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -292,10 +285,10 @@ impl PluginWizard {
     fn is_form_xml(&self, path: &str) -> bool {
         Regex::new("form\\.xml$").unwrap().is_match(path)
     }
-
-    fn is_procedure_dsl(&self, path: &str) -> bool {
-        Regex::new("procedure\\.dsl$").unwrap().is_match(path)
-    }
+//
+//    fn is_procedure_dsl(&self, path: &str) -> bool {
+//        Regex::new("procedure\\.dsl$").unwrap().is_match(path)
+//    }
 
     fn is_property(&self, path: &str) -> bool {
         let regexp_str = format!("dsl{}properties{}", path::MAIN_SEPARATOR, path::MAIN_SEPARATOR);
@@ -364,12 +357,12 @@ mod tests {
         println!("{}", xpath);
         assert_eq!(xpath, "//property[propertyName=\"jython\"]/propertySheet/property[propertyName=\"add_server_to_cluster.jython\"]/value");
     }
-
-    fn build_ef_client() -> EFClient {
-        let ef_client = EFClient::new("ubuntu-esxi", Some("admin"),
-                                      Some("changeme"), None).unwrap();
-        ef_client
-    }
+//
+//    fn build_ef_client() -> EFClient {
+//        let ef_client = EFClient::new("ubuntu-esxi", Some("admin"),
+//                                      Some("changeme"), None).unwrap();
+//        ef_client
+//    }
 
     #[test]
     fn test_plugin_wizard() {
@@ -402,15 +395,6 @@ mod tests {
             ef_client
         ).unwrap();
         watch_placeholder(&plugin);
-    }
-
-    #[test]
-    fn build_generic_plugin() {
-        let plugin_path = PathBuf::from("/Users/imago/Documents/ecloud/plugins/containers/EC-Kubernetes");
-        let mut plugin: PartialUpdate;
-        let res = PluginWizard::build(plugin_path);
-        plugin = res.unwrap();
-        assert!(true);
     }
 
 
