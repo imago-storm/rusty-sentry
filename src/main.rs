@@ -5,12 +5,12 @@ extern crate getopts;
 extern crate serde_derive;
 extern crate serde_xml_rs;
 extern crate url;
+extern crate shellexpand;
 
 use std::env;
 use std::path::PathBuf;
 use std::process::exit;
 use std::time::Duration;
-use std::collections::LinkedList;
 use std::sync::mpsc::channel;
 use std::fs::File;
 use std::error::Error;
@@ -18,10 +18,10 @@ use std::io::prelude::*;
 use getopts::Options;
 use url::Url;
 use notify::{RecommendedWatcher, Watcher, RecursiveMode, DebouncedEvent};
-use rusty_sentry::updater::Updater;
+use rusty_sentry::updater::{PartialUpdate, guess_plugin_type, PluginType, PluginWizard, PluginGradle};
 use rusty_sentry::ef_client::EFClient;
 use serde_xml_rs::deserialize;
-
+use shellexpand::tilde;
 
 const SERVER: &str = "s";
 const USERNAME: &str = "u";
@@ -89,7 +89,10 @@ fn read_sid(server: &str) -> Option<String> {
         Err(_) => return None,
     };
     let mut contents = String::new();
-    file.read_to_string(&mut contents);
+    let result = file.read_to_string(&mut contents);
+    if result.is_err() {
+        return None;
+    }
 
     let sessions: Result<Sessions, serde_xml_rs::Error> = deserialize(contents.as_bytes());
     match sessions {
@@ -143,7 +146,9 @@ fn main() {
 
     let path: PathBuf = match matches.opt_str("path") {
         None => env::current_dir().unwrap(),
-        Some(p) => PathBuf::from(p)
+        Some(p) => {
+            PathBuf::from(tilde(&p).into_owned())
+        }
     };
 
     let ef_client = match build_client(&matches) {
@@ -153,19 +158,40 @@ fn main() {
             exit(-1);
         }
     };
-    let updater = match Updater::new(&path, ef_client) {
-        Ok(u) => u,
+
+    let plugin_type = guess_plugin_type(&path);
+    let result = match plugin_type {
+        Ok(PluginType::PluginWizard) => {
+            let updater = PluginWizard::build(&path, ef_client);
+            match updater {
+                Ok(upd) => watch(&path, &upd),
+                Err(e) => {
+                    eprintln!("Cannot build updater: {}", e);
+                    exit(1)
+                }
+            }
+        },
+        Ok(PluginType::Gradle) => {
+            let updater = PluginGradle::build(&path, ef_client);
+            match updater {
+                Ok(upd) => watch(&path, &upd),
+                Err(e) => {
+                    eprintln!("Cannot build updater: {}", e);
+                    exit(1)
+                }
+            }
+        },
         Err(e) => {
-            eprintln!("Cannot create updater: {}", e);
-            exit(-1);
+            eprintln!("Cannot deduce plugin type: {}", e);
+            exit(1);
         }
     };
 
-    if let Err(e) = watch(&path, &updater) {
-        eprintln!("Error: {:?}", e);
-    }
+    if result.is_err() {
+        eprintln!("Watch failed: {}", result.unwrap_err());
+        exit(1);
+    };
 }
-
 
 fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
     let server = matches.opt_str(SERVER).expect("Server must be provided");
@@ -187,20 +213,28 @@ fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
     }
 }
 
-fn watch(path: &PathBuf, updater: &Updater) -> notify::Result<()> {
+
+fn watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUpdate {
     let (tx, rx) = channel();
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(1))?;
     watcher.watch(path, RecursiveMode::Recursive)?;
+
     println!("Started to watch {}", path.to_str().unwrap());
     loop {
         match rx.recv() {
             Ok(DebouncedEvent::Create(path)) => {
                 println!("Created {}", path.to_str().unwrap());
-                updater.update(&path);
+                let result = plugin.update(&path);
+                if result.is_err() {
+                    eprintln!("Error while updating: {}", result.err().unwrap());
+                }
             },
             Ok(DebouncedEvent::Write(path)) => {
                 println!("Write: {:?}", path);
-                updater.update(&path);
+                let result = plugin.update(&path);
+                if result.is_err() {
+                    eprintln!("Error while updating: {}", result.err().unwrap());
+                }
             },
             Ok(_) => {
             },
@@ -210,4 +244,3 @@ fn watch(path: &PathBuf, updater: &Updater) -> notify::Result<()> {
         }
     }
 }
-
