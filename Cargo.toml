@@ -1,6 +1,6 @@
 [package]
 name = "ecpluginbuilder"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Polina Shubina <925043@gmail.com>"]
 
 [dependencies]

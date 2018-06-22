@@ -114,16 +114,18 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
 
+    print_version();
+
     let mut opts = Options::new();
     opts.optflag("h", "help", "Print this help menu");
-    opts.optflag("v", "version", "Show the version");
+    opts.optflag("", "version", "Show the version");
+    opts.optflag("v", "verbose", "print debug output");
 
     opts.optopt(USERNAME, "username", "Provide username to connect to server", "");
     opts.reqopt(SERVER, "server", "provide server name to connect", "");
     opts.optopt("", PATH, "Provide path to the plugin folder", "PATH");
     opts.optopt(PASSWORD, "password", "provide password for the server to connect", "PASSWORD");
     opts.optopt("", SID, "provide session id to connect", "SID");
-
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => { m },
         Err(f) => {
@@ -134,9 +136,7 @@ fn main() {
     if matches.opt_present("h") {
         print_usage(&program, opts);
     }
-    if matches.opt_present("v") {
-        print_version();
-    }
+
 
     let _command = if !matches.free.is_empty() {
         matches.free[0].clone()
@@ -198,17 +198,25 @@ fn build_client(matches: &getopts::Matches) -> Result<EFClient, Box<Error>> {
     let username = matches.opt_str(USERNAME);
     let password = matches.opt_str(PASSWORD);
     let mut sid = matches.opt_str(SID);
-
+    let mut debug = 0;
+    if matches.opt_present("v") {
+        println!("Debug output enabled");
+        debug = 1;
+    }
     if sid.is_none() && (username.is_none() || password.is_none()) {
         sid = read_sid(&server);
     }
 
-    let client = EFClient::new(&server,
+    let mut client = EFClient::new(&server,
                                username.as_ref().map(|x| &**x),
                                password.as_ref().map(|x| &**x),
                                sid.as_ref().map(|x| &**x));
+
     match client {
-        Ok(c) => Ok(c),
+        Ok(mut c) => {
+            c.set_debug_level(debug);
+            Ok(c)
+        },
         Err(e) => Err(Box::new(e))
     }
 }
@@ -222,21 +230,15 @@ fn watch<T>(path: &PathBuf, plugin: &T) -> notify::Result<()> where T: PartialUp
     println!("Started to watch {}", path.to_str().unwrap());
     loop {
         match rx.recv() {
-            Ok(DebouncedEvent::Create(path)) => {
-                println!("Created {}", path.to_str().unwrap());
+            Ok(DebouncedEvent::Create(path)) | Ok(DebouncedEvent::Chmod(path)) | Ok(DebouncedEvent::Write(path)) => {
+                println!("Updated or created {}", path.to_str().unwrap());
                 let result = plugin.update(&path);
                 if result.is_err() {
                     eprintln!("Error while updating: {}", result.err().unwrap());
                 }
             },
-            Ok(DebouncedEvent::Write(path)) => {
-                println!("Write: {:?}", path);
-                let result = plugin.update(&path);
-                if result.is_err() {
-                    eprintln!("Error while updating: {}", result.err().unwrap());
-                }
-            },
-            Ok(_) => {
+            Ok(event) => {
+                println!("Other event: {:?}", event);
             },
             Err(error) => {
                 println!("Watch error: {:?}", error);
