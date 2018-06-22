@@ -114,6 +114,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
 
+    print_version();
+
     let mut opts = Options::new();
     opts.optflag("h", "help", "Print this help menu");
     opts.optflag("", "version", "Show the version");
@@ -134,9 +136,7 @@ fn main() {
     if matches.opt_present("h") {
         print_usage(&program, opts);
     }
-    if matches.opt_present("v") {
-        print_version();
-    }
+
 
     let _command = if !matches.free.is_empty() {
         matches.free[0].clone()
