@@ -210,7 +210,7 @@ impl PluginGradle {
                 self.ef_client.set_property(&property_name, &value)?;
                 return Ok(());
             } else {
-                println!("Command update is not supported yet: {:?}, {:?}", procedure_name, step_name);
+                println!("Command update is not supported yet for gradle: {:?}, {:?}", procedure_name, step_name);
             }
         }
         Ok(())
@@ -226,7 +226,7 @@ impl PartialUpdate for PluginWizard {
             println!("{} is a property!", path_str);
             self.update_property(path)?;
         } else if self.is_step_code(path_str) {
-            println!("{} is a step command, pls rebuild", path_str);
+            self.update_step(path)?;
         } else if self.is_form_xml(path_str) {
             println!("{} is a form.xml, pls rebuild", path_str);
         }
@@ -285,15 +285,123 @@ impl PluginWizard {
     fn is_form_xml(&self, path: &str) -> bool {
         Regex::new("form\\.xml$").unwrap().is_match(path)
     }
-//
-//    fn is_procedure_dsl(&self, path: &str) -> bool {
-//        Regex::new("procedure\\.dsl$").unwrap().is_match(path)
-//    }
+
 
     fn is_property(&self, path: &str) -> bool {
         let regexp_str = format!("dsl{}properties{}", path::MAIN_SEPARATOR, path::MAIN_SEPARATOR);
         let reg = Regex::new(&regexp_str).unwrap();
         reg.is_match(path)
+    }
+
+    fn update_step(&self, path: &PathBuf) -> Result<(), Error> {
+        let res = self.get_procedure_and_step_name(path);
+        match res {
+            Ok((procedure_name, step_name)) => {
+                println!("Procedure name: {}, step name: {}", procedure_name, step_name);
+                let plugin = &self.ef_client.get_plugin(&self.meta.key)?;
+                let command = &self.get_file_content(path,&self.meta)?;
+                &self.ef_client.set_procedure_command(
+                    &plugin.plugin_name,
+                    &procedure_name, &step_name,
+                    &command);
+            },
+            Err(e) => {
+                eprintln!("Cannot deduce procedure or step name from {}: {}", path.display(), e);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_procedure_and_step_name(&self, path: &PathBuf) -> Result<(String, String), Error> {
+        let path_part = self.meta.folder.join("dsl/procedures");
+        let relative_path = path.strip_prefix(&self.meta.folder);
+        let path = path.strip_prefix(&path_part);
+        if path.is_err() || relative_path.is_err() {
+            return Err(Error::new(ErrorKind::Other, "Cannot strip prefix"));
+        }
+        let relative_path = relative_path.unwrap();
+        let path = path.unwrap();
+        let procedure_folder_name = path.iter().next();
+        if procedure_folder_name .is_none() {
+            return Err(Error::new(ErrorKind::Other, "Cannot get procedure folder name"));
+        }
+        let procedure_folder_name = procedure_folder_name.unwrap();
+        let procedure_dsl_path = self.meta.folder.join("dsl/procedures").join(procedure_folder_name).join("procedure.dsl");
+
+        let mut f = File::open(procedure_dsl_path)?;
+        let mut contents = String::new();
+        f.read_to_string(&mut contents)?;
+        let step_name = Self::deduce_step_name(&contents, &relative_path.display().to_string());
+        if step_name.is_none() {
+            return Err(Error::new(ErrorKind::Other, "Cannot deduce step name"));
+        }
+        let step_name = step_name.unwrap();
+
+        let procedure_name = Self::deduce_procedure_name(&contents);
+        if procedure_name.is_none() {
+            return Err(Error::new(ErrorKind::Other, "Cannot deduce procedure name"));
+        }
+        let procedure_name = procedure_name.unwrap();
+
+        Ok((procedure_name, step_name))
+    }
+
+
+    fn deduce_step_name(fragment: &str, relative_path: &str) -> Option<String> {
+        let step_name_re = Regex::new(&relative_path).unwrap();
+        let first = step_name_re.split(fragment).next();
+        let first = match first {
+            Some(f) => f,
+            None => return None
+        };
+
+        let re = Regex::new("step\\s+['\"]([\\w\\s\\-_]+)['\"]").unwrap();
+        let step_name = match re.captures_iter(first).last() {
+            Some(caps) => {
+                let step_name = caps.iter().last().unwrap().unwrap().as_str();
+                Some(String::from(step_name))
+            },
+            None => return None,
+        };
+        step_name
+    }
+
+
+    fn deduce_procedure_name(fragment: &str) -> Option<String> {
+//        First attempt
+        let re = Regex::new("procedure\\s+['\"]([\\w\\s\\-_]+)['\"]").unwrap();
+        let caps = re.captures(fragment);
+        match caps {
+            Some(caps) => {
+                let procedure_name = caps.iter().last().unwrap().unwrap().as_str();
+                return Some(String::from(procedure_name));
+            },
+            None => ()
+        };
+
+//        Second attempt
+
+        let re = Regex::new("procedure\\s+([\\w_]+)").unwrap();
+        let caps = re.captures(fragment);
+        let var_name = match caps {
+            Some(caps) => {
+                let var_name = caps.iter().last().unwrap().unwrap().as_str();
+                var_name
+            },
+            None => {
+                return None;
+            }
+        };
+
+        let re = Regex::new(&format!("{}\\s*=\\s*['\"]([\\w\\s\\-_]+)[\"']", var_name)).unwrap();
+        let caps = re.captures(fragment);
+        match caps {
+            Some(caps) => {
+                let procedure_name = caps.iter().last().unwrap().unwrap().as_str();
+                return Some(String::from(procedure_name));
+            },
+            None =>  None
+        }
     }
 }
 
@@ -357,12 +465,6 @@ mod tests {
         println!("{}", xpath);
         assert_eq!(xpath, "//property[propertyName=\"jython\"]/propertySheet/property[propertyName=\"add_server_to_cluster.jython\"]/value");
     }
-//
-//    fn build_ef_client() -> EFClient {
-//        let ef_client = EFClient::new("ubuntu-esxi", Some("admin"),
-//                                      Some("changeme"), None).unwrap();
-//        ef_client
-//    }
 
     #[test]
     fn test_plugin_wizard() {
@@ -376,8 +478,41 @@ mod tests {
         println!("{:?}", plugin);
 
         assert!(plugin.is_ok());
+//
+//        plugin.unwrap().get_procedure_and_step_name(&PathBuf::from("/Users/imago/Documents/ecloud/plugins/containers/EC-Kubernetes/dsl/procedures/checkCluster/steps/checkCluster.groovy"));
+
     }
 
+    static FRAGMENT1: &str = "\
+         procedure 'procName', {\
+         step 'stepName', { command = new File('dsl/procedures/procName/steps/stepName.groovy')},\
+         step 'another step', command: new File('dsl/procedures/procName/steps/anotherStepName.groovy')";
+
+    static FRAGMENT2: &str = "def procName = 'procedure',\
+    procedure procName, {";
+
+
+    #[test]
+    fn deduce_step_name_test() {
+        let step_name = PluginWizard::deduce_step_name(FRAGMENT1,
+       "dsl/procedures/procName/steps/anotherStepName.groovy");
+        assert!(step_name.is_some());
+        assert_eq!(step_name.unwrap(), "another step");
+    }
+
+    #[test]
+    fn deduce_procedure_name_test() {
+        let procedure_name = PluginWizard::deduce_procedure_name(FRAGMENT1);
+        assert!(procedure_name.is_some());
+        assert_eq!(procedure_name.unwrap(), "procName");
+    }
+
+    #[test]
+    fn deduce_procedure_name_in_var_test() {
+        let procedure_name = PluginWizard::deduce_procedure_name(FRAGMENT2);
+        assert!(procedure_name.is_some());
+        assert_eq!(procedure_name.unwrap(), "procedure");
+    }
 
     fn watch_placeholder<T>(plugin: &T) where T: PartialUpdate {
         let path = PathBuf::new();
