@@ -210,7 +210,12 @@ impl PluginGradle {
                 self.ef_client.set_property(&property_name, &value)?;
                 return Ok(());
             } else {
-                println!("Command update is not supported yet for gradle: {:?}, {:?}", procedure_name, step_name);
+                let procedure_name = procedure_name.expect("procedure name is not found");
+                let step_name = step_name.expect("step name is not found");
+                let plugin = self.ef_client.get_plugin(&self.meta.key)?;
+                println!("Procedure name: {}, step name: {}", procedure_name, step_name);
+                let _res = self.ef_client.set_procedure_command(&plugin.plugin_name, &procedure_name, &step_name, &value)?;
+                println!("Updated step");
             }
         }
         Ok(())
