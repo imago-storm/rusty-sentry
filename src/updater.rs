@@ -130,7 +130,7 @@ impl PartialUpdate for PluginGradle {
         }
         let metadata = PluginMeta {
             key: String::from(plugin_name),
-            version: String::from(version),
+            version: String::from(format!("{}.0", version)),
             folder: folder.clone(),
         };
         let manifest_path = folder.join("src").join("main").join("resources").join("project").join("manifest.xml");
@@ -182,14 +182,14 @@ impl PluginGradle {
                 println!("Property sheet");
             } else if token.starts_with("procedure") {
                 println!("Procedure: {}", token);
-                let re = Regex::new("procedureName=[\"'](\\w+)[\"']").unwrap();
+                let re = Regex::new("procedureName=[\"']([\\w\\s]+)[\"']").unwrap();
                 let caps = re.captures(token);
                 if caps.is_some() {
                     procedure_name = Some(caps.unwrap().get(1).unwrap().as_str());
                 }
             } else if token.starts_with("step") {
                 println!("Step: {}", token);
-                let re = Regex::new("stepName=[\"'](\\w+)[\"']").unwrap();
+                let re = Regex::new("stepName=[\"']([\\w\\s]+)[\"']").unwrap();
                 let caps = re.captures(token);
                 if caps.is_some() {
                     step_name = Some(caps.unwrap().get(1).unwrap().as_str());
@@ -271,7 +271,12 @@ impl PluginWizard {
         }
         let value = self.get_file_content(path, &self.meta)?;
         let prefix = self.meta.folder.join("dsl").join("properties");
-        let path = path.strip_prefix(&prefix).unwrap();
+        let path = match path.strip_prefix(&prefix) {
+            Err(e) => {
+                return Err(Error::new(ErrorKind::Other, format!("Cannot strip prefix: {}", e)));
+            },
+            Ok(path) => path
+        };
         let re = Regex::new("\\..+$").unwrap();
         let mut property_name: String = String::from(re.replace_all(path.to_str().unwrap(), ""));
         let plugin_name = &self.meta.key;
@@ -336,7 +341,11 @@ impl PluginWizard {
         let mut f = File::open(procedure_dsl_path)?;
         let mut contents = String::new();
         f.read_to_string(&mut contents)?;
-        let step_name = Self::deduce_step_name(&contents, &relative_path.display().to_string());
+        let file_name = relative_path.file_name();
+        if file_name.is_none() {
+            return Err(Error::new(ErrorKind::Other, "Relative path cannot be calculated"));
+        }
+        let step_name = Self::deduce_step_name(&contents, file_name.unwrap().to_str().unwrap());
         if step_name.is_none() {
             return Err(Error::new(ErrorKind::Other, "Cannot deduce step name"));
         }
