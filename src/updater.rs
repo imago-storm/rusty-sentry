@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use regex::Regex;
+use regex::{Regex, escape};
 use std::path;
 use std::io::{Error, ErrorKind};
 use std::fs::File;
@@ -278,7 +278,9 @@ impl PluginWizard {
             Ok(path) => path
         };
         let re = Regex::new("\\..+$").unwrap();
-        let mut property_name: String = String::from(re.replace_all(path.to_str().unwrap(), ""));
+        let mut property_name: String = String::from(re.replace_all(path.to_str().expect("Cannot remove file extension from property"), ""));
+        let re = Regex::new("\\\\").expect("Cannot compile regexp");
+        property_name = String::from(re.replace_all(&property_name, "/"));
         let plugin_name = &self.meta.key;
         property_name = format!("/plugins/{}/project/{}", plugin_name, property_name);
         println!("Property name: {}", property_name);
@@ -287,7 +289,8 @@ impl PluginWizard {
     }
 
     fn is_step_code(&self, path: &str) -> bool {
-        let regexp_str = format!("dsl{}procedures{}[\\w\\s]+{}steps", path::MAIN_SEPARATOR, path::MAIN_SEPARATOR, path::MAIN_SEPARATOR);
+        let sep = escape(&path::MAIN_SEPARATOR.to_string());
+        let regexp_str = format!("dsl{}procedures{}[\\w\\s]+{}steps", sep, sep, sep);
         let reg = Regex::new(&regexp_str).unwrap();
         reg.is_match(path)
     }
@@ -298,8 +301,9 @@ impl PluginWizard {
 
 
     fn is_property(&self, path: &str) -> bool {
-        let regexp_str = format!("dsl{}properties{}", path::MAIN_SEPARATOR, path::MAIN_SEPARATOR);
-        let reg = Regex::new(&regexp_str).unwrap();
+        let separator = escape(&path::MAIN_SEPARATOR.to_string());
+        let regexp_str = format!("dsl{}properties{}", separator, separator);
+        let reg = Regex::new(&regexp_str).expect("Failed to compile regexp for property checking");
         reg.is_match(path)
     }
 
