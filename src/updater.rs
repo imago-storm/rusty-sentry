@@ -62,6 +62,7 @@ pub struct PluginMeta {
 pub struct PluginWizard {
     meta: PluginMeta,
     ef_client: EFClient,
+    update_options: UpdateOptions,
 }
 
 #[derive(Debug)]
@@ -69,12 +70,18 @@ pub struct PluginGradle {
     meta: PluginMeta,
     manifest_path: PathBuf,
     ef_client: EFClient,
+    update_options: UpdateOptions,
+}
+
+#[derive(Debug)]
+pub struct UpdateOptions {
+    pub keep_extensions: bool
 }
 
 pub trait PartialUpdate {
     type PluginType;
     fn update(&self, file: &PathBuf) -> Result<(), Error>;
-    fn build(plugin_folder: &PathBuf, ef_client: EFClient) -> Result<Self::PluginType, Error>;
+    fn build(plugin_folder: &PathBuf, ef_client: EFClient, options: UpdateOptions) -> Result<Self::PluginType, Error>;
 
     fn get_file_content(&self, path: &Path, meta: &PluginMeta) -> Result<String, Error> {
         let res = File::open(path);
@@ -109,7 +116,7 @@ impl PartialUpdate for PluginGradle {
         Ok(())
     }
 
-    fn build(folder: &PathBuf, ef_client: EFClient) -> Result<Self::PluginType, Error> {
+    fn build(folder: &PathBuf, ef_client: EFClient, options: UpdateOptions) -> Result<Self::PluginType, Error> {
         println!("Reading gradle metadata\n");
         let mut gradle_path = folder.clone();
         gradle_path.push("build.gradle");
@@ -139,6 +146,7 @@ impl PartialUpdate for PluginGradle {
             meta: metadata,
             manifest_path,
             ef_client,
+            update_options: options
         })
     }
 }
@@ -238,7 +246,7 @@ impl PartialUpdate for PluginWizard {
         Ok(())
     }
 
-    fn build(folder: &PathBuf, ef_client: EFClient) -> Result<Self::PluginType, Error> {
+    fn build(folder: &PathBuf, ef_client: EFClient, options: UpdateOptions) -> Result<Self::PluginType, Error> {
         let metadata_path = folder.join("META-INF").join("plugin.xml");
         println!("Trying {}", metadata_path.to_str().unwrap());
         let mut f = File::open(&metadata_path)?;
@@ -246,6 +254,9 @@ impl PartialUpdate for PluginWizard {
         f.read_to_string(&mut contents)?;
         println!("Contents: {}", contents);
         let plugin: Result<PluginMETAINF, serde_xml_rs::Error> = deserialize(contents.as_bytes());
+        if options.keep_extensions {
+            println!("Keeping files extensions in the property names");
+        }
         match plugin {
             Ok(p) => {
                 let metadata = PluginMeta{
@@ -255,7 +266,8 @@ impl PartialUpdate for PluginWizard {
                 };
                 Ok(PluginWizard{
                     meta: metadata,
-                    ef_client
+                    ef_client,
+                    update_options: options
                 })
             }
             Err(error) => Err(Error::new(ErrorKind::Other, format!("Cannot parse {}: {}", metadata_path.display(), error)))
@@ -277,8 +289,12 @@ impl PluginWizard {
             },
             Ok(path) => path
         };
-        let re = Regex::new("\\..+$").unwrap();
-        let mut property_name: String = String::from(re.replace_all(path.to_str().expect("Cannot remove file extension from property"), ""));
+        let mut property_name: String = String::from(path.to_str().expect("Cannot convert path to str"));
+        if !self.update_options.keep_extensions {
+            let re = Regex::new("\\..+$").unwrap();
+            property_name = String::from(re.replace_all(&property_name, ""))
+        }
+
         let re = Regex::new("\\\\").expect("Cannot compile regexp");
         property_name = String::from(re.replace_all(&property_name, "/"));
         let plugin_name = &self.meta.key;

@@ -18,7 +18,7 @@ use std::io::prelude::*;
 use getopts::Options;
 use url::Url;
 use notify::{RecommendedWatcher, Watcher, RecursiveMode, DebouncedEvent};
-use rusty_sentry::updater::{PartialUpdate, guess_plugin_type, PluginType, PluginWizard, PluginGradle};
+use rusty_sentry::updater::{PartialUpdate, guess_plugin_type, PluginType, PluginWizard, PluginGradle, UpdateOptions};
 use rusty_sentry::ef_client::EFClient;
 use serde_xml_rs::deserialize;
 use shellexpand::tilde;
@@ -28,6 +28,7 @@ const USERNAME: &str = "u";
 const PASSWORD: &str = "p";
 const PATH: &str = "path";
 const SID: &str = "sid";
+const KEEP_EXTENSIONS: &str = "ke";
 
 #[derive(Deserialize, Debug)]
 struct Session {
@@ -126,6 +127,8 @@ fn main() {
     opts.optopt("", PATH, "Provide path to the plugin folder", "PATH");
     opts.optopt(PASSWORD, "password", "provide password for the server to connect", "PASSWORD");
     opts.optopt("", SID, "provide session id to connect", "SID");
+    opts.optflag("k", "keep-extensions", "keeps file extensions");
+
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => { m },
         Err(f) => {
@@ -159,10 +162,20 @@ fn main() {
         }
     };
 
+    let ke: bool = if matches.opt_present("k") {
+        true
+    } else {
+        false
+    };
+
+    let options = UpdateOptions {
+        keep_extensions: ke
+    };
+
     let plugin_type = guess_plugin_type(&path);
     let result = match plugin_type {
         Ok(PluginType::PluginWizard) => {
-            let updater = PluginWizard::build(&path, ef_client);
+            let updater = PluginWizard::build(&path, ef_client, options);
             match updater {
                 Ok(upd) => watch(&path, &upd),
                 Err(e) => {
@@ -172,7 +185,7 @@ fn main() {
             }
         },
         Ok(PluginType::Gradle) => {
-            let updater = PluginGradle::build(&path, ef_client);
+            let updater = PluginGradle::build(&path, ef_client, options);
             match updater {
                 Ok(upd) => watch(&path, &upd),
                 Err(e) => {
