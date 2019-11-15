@@ -74,7 +74,14 @@ fn read_sid(server: &str) -> Option<String> {
             if sid_path.exists() {
                 Some(sid_path)
             } else {
-                None
+                sid_path = path.clone();
+                sid_path.push(".cfsession");
+                if sid_path.exists() {
+                    Some(sid_path)
+                }
+                else {
+                    None
+                }
             }
         },
         None => None
